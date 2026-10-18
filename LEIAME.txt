@@ -1,0 +1,9 @@
+Churrasco do Zé - lista de músicas
+
+1) Suba estes arquivos num repositório do GitHub (index.html, capa.jpg, duracoes.json).
+2) Settings > Pages > Deploy from a branch > main / root.
+3) O link gerado (https://SEU-USUARIO.github.io/NOME-DO-REPO/) é o que vai no QR Code.
+   (Na Vercel: importe o repositório ou arraste a pasta, sem configurar build.)
+
+Duração: preencha duracoes.json no formato {"54405":"3:42","54748":"4:10"} (chave = código).
+Músicas sem duração mostram "não informada".
