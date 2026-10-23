@@ -30,13 +30,15 @@ ADMIN_KEY = "GUILHERME2026"      # NUNCA colocar no site (libera /comando e prio
 ORIGENS_PERMITIDAS = [r"^https://guilherme-lopesz\.github\.io$"]
 JANELA_TITULO = ""            # parte do titulo da janela do karaoke (vazio = nao forca foco)
 INTERVALO_ENTRE_PEDIDOS = 1.5
-INTERVALO_ENTRE_TECLAS = 0.08
+INTERVALO_ENTRE_TECLAS = 0.25      # pausa entre um digito e o proximo (aumente se ainda perder digitos)
+TEMPO_TECLA_PRESSIONADA = 0.08    # quanto tempo cada tecla fica apertada
+ESPERA_ANTES_DE_DIGITAR = 0.6     # espera apos focar a janela, antes do primeiro digito
 TEMPO_PRIORIDADE = 3.0
 MAX_FILA = 15                 # maximo de pedidos aguardando
 COOLDOWN_POR_CLIENTE = 15     # segundos entre pedidos do mesmo celular (o site usa o mesmo valor em "cooldown")
 # ----------------------------------------------
 
-pyautogui.PAUSE = INTERVALO_ENTRE_TECLAS
+pyautogui.PAUSE = 0.1
 app = Flask(__name__)
 CORS(app, origins=ORIGENS_PERMITIDAS, allow_headers=["Content-Type", "X-API-Key"], methods=["GET", "POST", "OPTIONS"])
 fila = queue.Queue()
@@ -58,13 +60,23 @@ def focar_janela():
             pass
 
 
+def digitar(codigo):
+    """Digita digito a digito, segurando cada tecla, para o karaoke nao perder nenhum."""
+    time.sleep(ESPERA_ANTES_DE_DIGITAR)
+    for c in str(codigo):
+        pyautogui.keyDown(c)
+        time.sleep(TEMPO_TECLA_PRESSIONADA)
+        pyautogui.keyUp(c)
+        time.sleep(INTERVALO_ENTRE_TECLAS)
+
+
 def enviar_musica(codigo):
-    pyautogui.write(str(codigo), interval=INTERVALO_ENTRE_TECLAS)
+    digitar(codigo)
     pyautogui.press("enter")
 
 
 def enviar_prioridade(codigo):
-    pyautogui.write(str(codigo), interval=INTERVALO_ENTRE_TECLAS)
+    digitar(codigo)
     pyautogui.keyDown("enter")
     try:
         time.sleep(TEMPO_PRIORIDADE)
