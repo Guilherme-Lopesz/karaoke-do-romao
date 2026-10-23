@@ -25,8 +25,8 @@ except Exception:
     gw = None
 
 # ---------------- CONFIGURACAO ----------------
-PUBLIC_KEY = "chave-publica-do-site"   # a mesma "key" do karaoke-config.json (so permite /musica)
-ADMIN_KEY = "chave-admin-secreta"      # NUNCA colocar no site (libera /comando e prioridade)
+PUBLIC_KEY = "zezin2026"   # a mesma "key" do karaoke-config.json (so permite /musica)
+ADMIN_KEY = "GUILHERME2026"      # NUNCA colocar no site (libera /comando e prioridade)
 # Dominio EXATO do site, sem o caminho (/karaoke-do-romao nao entra aqui)
 ORIGENS_PERMITIDAS = [r"^https://guilherme-lopesz\.github\.io$"]
 JANELA_TITULO = ""            # parte do titulo da janela do karaoke (vazio = nao forca foco)
