@@ -25,8 +25,8 @@ except Exception:
     gw = None
 
 # ---------------- CONFIGURACAO ----------------
-PUBLIC_KEY = "zezin2026"   # a mesma "key" do karaoke-config.json (so permite /musica)
-ADMIN_KEY = "GUILHERME2026"      # NUNCA colocar no site (libera /comando e prioridade)
+PUBLIC_KEY = "chave-publica-do-site"   # a mesma "key" do karaoke-config.json (so permite /musica)
+ADMIN_KEY = "chave-admin-secreta"      # NUNCA colocar no site (libera /comando e prioridade)
 # Dominio EXATO do site, sem o caminho (/karaoke-do-romao nao entra aqui)
 ORIGENS_PERMITIDAS = [r"^https://guilherme-lopesz\.github\.io$"]
 JANELA_TITULO = ""            # parte do titulo da janela do karaoke (vazio = nao forca foco)
@@ -35,7 +35,7 @@ INTERVALO_ENTRE_TECLAS = 0.25      # pausa entre um digito e o proximo (aumente 
 TEMPO_TECLA_PRESSIONADA = 0.08    # quanto tempo cada tecla fica apertada
 ESPERA_ANTES_DE_DIGITAR = 0.6     # espera apos focar a janela, antes do primeiro digito
 TEMPO_PRIORIDADE = 3.0
-MAX_FILA = 15                 # maximo de pedidos aguardando
+MAX_FILA = 10                 # maximo de pedidos aguardando na fila
 SENHA_FESTA = "zezin63"         # senha que o convidado digita no site (so quem sabe consegue pedir)
 MAX_POR_PESSOA = 3            # pedidos aguardando por pessoa ao mesmo tempo
 REPETIR_MIN = 30              # minutos ate a mesma musica poder ser pedida de novo
@@ -102,9 +102,9 @@ COMANDOS = {
 }
 
 
-def novo_pedido(tipo, valor, nome="", cli="", prio=False):
+def novo_pedido(tipo, valor, nome="", cli="", prio=False, quem=""):
     estado["seq"] += 1
-    p = dict(id=estado["seq"], tipo=tipo, codigo=str(valor), nome=nome, cliente=cli, prio=prio,
+    p = dict(id=estado["seq"], tipo=tipo, codigo=str(valor), nome=nome, quem=quem, cliente=cli, prio=prio,
              status="aguardando", t=time.time())
     pedidos.append(p)
     if len(pedidos) > 300:  # descarta os mais antigos ja finalizados
@@ -172,7 +172,7 @@ def hora(t):
 
 
 def publico(p):
-    return dict(id=p["id"], codigo=p["codigo"], nome=p["nome"], status=p["status"], hora=hora(p["t"]))
+    return dict(id=p["id"], codigo=p["codigo"], nome=p["nome"], quem=p["quem"], status=p["status"], hora=hora(p["t"]))
 
 
 @app.get("/")
@@ -215,9 +215,12 @@ def musica():
     if not codigo.isdigit() or len(codigo) > 8:
         return jsonify(erro="codigo invalido"), 400
     nome = str(dados.get("nome", "")).strip()[:80]
+    quem = "".join(ch for ch in str(dados.get("quem", "")) if ch.isprintable() and ch not in "<>&\"'")[:20].strip()
     eh_admin = k == ADMIN_KEY
     cli = cliente()
     if not eh_admin:
+        if not quem:
+            return jsonify(erro="nome"), 400
         if cli in bloq_clientes:
             return jsonify(erro="bloqueado"), 403
         erro = verificar_senha()
@@ -243,7 +246,7 @@ def musica():
                 return jsonify(erro="aguarde", espere=int(falta) + 1), 429
             ultimo[cli] = agora
         prio = eh_admin and bool(dados.get("prioridade"))
-        p = novo_pedido("prioridade" if prio else "musica", codigo, nome, cli, prio)
+        p = novo_pedido("prioridade" if prio else "musica", codigo, nome, cli, prio, quem or "Zé")
         pos = sum(1 for x in pedidos if x["status"] == "aguardando" and x["id"] <= p["id"] and x["tipo"] != "comando")
         return jsonify(ok=True, id=p["id"], posicao=pos)
 
@@ -331,7 +334,7 @@ li{padding:7px 0;border-bottom:1px solid #6b4a1f;list-style:none}ul{padding:0}sm
 let K=sessionStorage.getItem('k')||'';
 const E=s=>String(s).replace(/[&<>"']/g,c=>'&#'+c.charCodeAt(0)+';');
 async function api(p,b){try{const r=await fetch(p,{method:b?'POST':'GET',headers:{'Content-Type':'application/json','X-API-Key':K},body:b?JSON.stringify(b):undefined});return r.ok?r.json():null}catch(e){return null}}
-const li=p=>`<li><b>${E(p.codigo)}</b> ${E(p.nome)} <small>${p.status} · ${p.hora} · ${E(p.cliente)}</small>
+const li=p=>`<li><b>${E(p.codigo)}</b> ${E(p.nome)} <small>👤 ${E(p.quem||"")} · ${p.status} · ${p.hora} · ${E(p.cliente)}</small>
 ${p.status=='aguardando'?`<button class=r onclick="a('cancelar','${p.id}')">Cancelar</button>`:''}${p.tipo!='comando'?`<button onclick="a('bloquear_cliente','${E(p.cliente)}')">Bloquear pessoa</button>`:''}</li>`;
 async function ver(){const d=await api('/admin/estado');if(!d)return false;login.hidden=true;app.hidden=false;
 st.textContent=(d.aberto?'✅ Pedidos ABERTOS':'⛔ Pedidos FECHADOS')+' · '+(d.pausado?'⏸ digitação PAUSADA':'▶ digitando normalmente');
