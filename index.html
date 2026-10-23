@@ -63,6 +63,11 @@ dialog::backdrop{background:rgba(10,5,2,.75)}
 .more{display:block;margin:20px auto;font:600 16px var(--body);color:var(--gold);background:none;border:2px solid var(--gold-lo);border-radius:12px;padding:11px 22px;cursor:pointer}
 .more:hover{background:rgba(233,185,73,.09)}
 .row{cursor:pointer}
+.auto{display:block;width:100%;margin-top:16px;font:600 17px var(--body);color:#2b1a0a;background:var(--goldgrad);border:0;border-radius:12px;padding:14px;cursor:pointer}
+.auto:disabled{opacity:.65;cursor:default}
+.auto:focus-visible,.close:focus-visible{outline:2px solid var(--gold-hi);outline-offset:2px}
+.amsg{text-align:center;color:var(--muted);font-size:14px;margin:8px 0 0;min-height:21px}
+.close.alt{background:none;color:var(--gold);border:2px solid var(--gold-lo);padding:11px;margin-top:8px}
 [hidden]{display:none!important}
 html,body{overflow-anchor:none}
 main{display:flow-root;min-height:calc(100vh - var(--bar,110px));min-height:calc(100dvh - var(--bar,110px))}
@@ -192,16 +197,54 @@ async function copy(t){
   try{const ta=document.createElement('textarea');ta.value=t;ta.setAttribute('readonly','');ta.style.cssText='position:fixed;opacity:0';
     document.body.appendChild(ta);ta.select();const ok=document.execCommand('copy');ta.remove();return ok}catch(e){return false}
 }
+/* ---------- pedido automático (digita o código no programa do karaokê) ----------
+   api = endereço do servidor (túnel HTTPS). Pode ser trocado sem mexer neste arquivo, editando karaoke-config.json.
+   key = chave PÚBLICA, igual à PUBLIC_KEY do karaoke_server.py. */
+const KCFG={api:'',key:'chave-publica-do-site',cooldown:15};
+let kBusy=false,kSent='',kWait=0,kTimer=0,kCur='',kMsg='';
+const kOk=c=>!!KCFG.api&&!!KCFG.key&&/^\d{1,8}$/.test(String(c));
+function kPaint(){
+  const b=$('#auto'),m=$('#amsg');if(!b)return;
+  const left=Math.ceil((kWait-Date.now())/1000);
+  if(kBusy){b.disabled=true;b.textContent='Enviando…'}
+  else if(kSent===kCur){b.disabled=true;b.textContent='✓ Pedido enviado!'}
+  else if(left>0){b.disabled=true;b.textContent='Aguarde '+left+'s para pedir outra'}
+  else{b.disabled=false;b.textContent='🎤 Digitar automaticamente no karaokê'}
+  m.textContent=kMsg;
+}
+async function kSend(code){
+  if(kBusy)return;
+  kBusy=true;kMsg='';kPaint();
+  const ac=new AbortController(),t=setTimeout(()=>ac.abort(),10000);
+  let msg='',ok=false;
+  try{
+    const r=await fetch(KCFG.api.replace(/\/+$/,'')+'/musica',{method:'POST',headers:{'Content-Type':'application/json','X-API-Key':KCFG.key},body:JSON.stringify({codigo:code}),signal:ac.signal});
+    let j={};try{j=await r.json()}catch(e){}
+    if(r.ok){ok=true;kWait=Date.now()+KCFG.cooldown*1000;const n=(j.na_fila||1)-1;
+      msg='Confira na tela do karaokê.'+(n>0?` Há ${n} pedido${n>1?'s':''} na frente.`:'')}
+    else if(r.status===429){kWait=Date.now()+(j.espere||KCFG.cooldown)*1000;msg='Calma! Um pedido por vez.'}
+    else if(r.status===503)msg='A fila do karaokê está cheia. Tente de novo em instantes.';
+    else if(r.status===401)msg='Pedido automático indisponível. Anote o código acima.';
+    else if(r.status===400)msg='Código inválido para pedido automático.';
+    else msg='Não foi possível enviar. Anote o código acima.';
+  }catch(e){msg='Karaokê fora do ar no momento. Anote o código acima.'}
+  clearTimeout(t);kBusy=false;
+  if(kCur===code){if(ok)kSent=code;kMsg=msg}
+  kPaint();
+}
 function openSong(a,s){
   const d=dur[s.c];
   $('#sh').innerHTML=`<p class="lbl" style="margin-top:0">Cantor</p><h3>${esc(a.n)}</h3>
   <p class="lbl">Música</p><h3>${esc(s.t)}</h3>
   <p class="lbl">Código</p><button class="code" id="cp" aria-label="Copiar código ${esc(s.c)}">${esc(s.c)}</button>
   <p class="tap" id="tap">Toque no código para copiar</p>`+
+(kOk(s.c)?`<button class="auto" id="auto"></button><p class="amsg" id="amsg" role="status" aria-live="polite"></p>`:'')+
   (d?`<p class="lbl">Duração: <b style="color:var(--cream)">${esc(d)}</b></p>`:'')+
-  `<button class="close" id="x">Fechar</button>`;
+  `<button class="close${kOk(s.c)?' alt':''}" id="x">Fechar</button>`;
   if(typeof dlg.showModal==='function')dlg.showModal();else dlg.setAttribute('open','');
   $('#x').onclick=()=>dlg.close();
+  kCur=s.c;kSent='';kMsg='';
+  if($('#auto')){$('#auto').onclick=()=>kSend(s.c);kPaint();clearInterval(kTimer);kTimer=setInterval(kPaint,500)}
   $('#cp').onclick=async()=>{$('#tap').textContent=(await copy(s.c))?'Código copiado!':'Anote o código acima'};
 }
 
@@ -214,6 +257,7 @@ main.addEventListener('click',e=>{
 });
 rail.addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;const el=document.getElementById('L'+b.dataset.l);if(el)el.scrollIntoView()});
 dlg.addEventListener('click',e=>{if(e.target===dlg)dlg.close()});
+dlg.addEventListener('close',()=>{clearInterval(kTimer);kCur=''});
 q.addEventListener('input',()=>{limit=PAGE;restore=null;if(hashArtist())clearHash();route();toList()});
 q.addEventListener('keydown',e=>{if(e.key==='Enter')q.blur()});
 addEventListener('hashchange',route);
@@ -221,6 +265,7 @@ if('ResizeObserver' in window)new ResizeObserver(()=>document.documentElement.st
 
 /* ---------- dados: usa lista_karaoke_rbk.json se estiver ao lado do index.html; senão, a cópia embutida ---------- */
 build(D);route();
+fetch('karaoke-config.json',{cache:'no-cache'}).then(r=>r.ok?r.json():null).then(j=>{if(j&&typeof j==='object')Object.assign(KCFG,j)}).catch(()=>{});
 fetch('duracoes.json').then(r=>r.ok?r.json():null).then(j=>{if(j&&typeof j==='object')dur=j}).catch(()=>{});
 fetch('lista_karaoke_rbk.json',{cache:'no-cache'}).then(r=>{if(!r.ok)throw 0;return r.json()}).then(j=>{
   if(!Array.isArray(j)||!j.length)return;const n=fromJson(j);
