@@ -34,7 +34,9 @@ SENHA_FESTA = "zezin2026" # senha que os convidados digitam (pergunte ao Ze)
 ORIGENS_PERMITIDAS = [r"^https://guilherme-lopesz\.github\.io$"]
 JANELA_TITULO = ""                # parte do titulo da janela do karaoke (vazio = nao forca foco)
 INTERVALO_ENTRE_PEDIDOS = 1.5
-INTERVALO_ENTRE_TECLAS = 0.08
+INTERVALO_ENTRE_TECLAS = 0.35    # pausa entre cada numero (se ainda errar, aumente: 0.5)
+TEMPO_TECLA_PRESSIONADA = 0.08   # quanto tempo cada tecla fica apertada
+PAUSA_ANTES_DO_ENTER = 0.6       # espera depois do ultimo numero, antes do Enter
 TEMPO_PRIORIDADE = 3.0
 
 # Regras (o site le estes valores em /fila e mostra no "Como funciona")
@@ -46,7 +48,7 @@ MUSICAS_BLOQUEADAS = set()        # ex.: {"12345", "67890"}
 MAX_TENTATIVAS_SENHA = 5          # senhas erradas por minuto, por IP
 # ----------------------------------------------
 
-pyautogui.PAUSE = INTERVALO_ENTRE_TECLAS
+pyautogui.PAUSE = 0.05
 app = Flask(__name__)
 CORS(
     app,
@@ -80,13 +82,23 @@ def focar_janela():
             pass
 
 
+def digitar(codigo):
+    """Digita numero por numero, devagar, segurando cada tecla um instante."""
+    for ch in str(codigo):
+        pyautogui.keyDown(ch)
+        time.sleep(TEMPO_TECLA_PRESSIONADA)
+        pyautogui.keyUp(ch)
+        time.sleep(INTERVALO_ENTRE_TECLAS)
+    time.sleep(PAUSA_ANTES_DO_ENTER)
+
+
 def enviar_musica(codigo):
-    pyautogui.write(str(codigo), interval=INTERVALO_ENTRE_TECLAS)
+    digitar(codigo)
     pyautogui.press("enter")
 
 
 def enviar_prioridade(codigo):
-    pyautogui.write(str(codigo), interval=INTERVALO_ENTRE_TECLAS)
+    digitar(codigo)
     pyautogui.keyDown("enter")
     try:
         time.sleep(TEMPO_PRIORIDADE)
