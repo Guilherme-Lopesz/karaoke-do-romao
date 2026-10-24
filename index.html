@@ -215,7 +215,7 @@ const kLS={g(k){try{return localStorage.getItem(k)||''}catch(e){return ''}},s(k,
 let kId=kLS.g('kid');
 if(!kId){kId=((window.crypto&&crypto.randomUUID)?crypto.randomUUID():String(Math.random()).slice(2)+Date.now()).replace(/[^a-z0-9]/gi,'').slice(0,24);kLS.s('kid',kId)}
 let kPw=kLS.g('kpw'),kBusy=false,kSent='',kWait=0,kTimer=0,kCur='',kNome='',kMsg='',kArm=0,kQT=0;
-let kR={cooldown:15,max_pessoa:3,repetir:30,max_fila:15};
+let kR={cooldown:15,max_pessoa:3,repetir:30,max_fila:10};
 const kOk=c=>!!KCFG.api&&!!KCFG.key&&/^\d{1,8}$/.test(String(c));
 const kU=p=>KCFG.api.replace(/\/+$/,'')+p;
 const kH=()=>({'Content-Type':'application/json','X-API-Key':KCFG.key,'X-Cliente':kId,'X-Senha':encodeURIComponent(kPw)});
