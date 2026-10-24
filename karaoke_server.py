@@ -30,7 +30,7 @@ except Exception:
 # ---------------- CONFIGURACAO ----------------
 PUBLIC_KEY = "zezin2026"          # igual ao "key" do karaoke-config.json
 ADMIN_KEY = "GUILHERME2026"       # NUNCA colocar no site
-SENHA_FESTA = "troque-esta-senha" # senha que os convidados digitam (pergunte ao Ze)
+SENHA_FESTA = "zezin2026" # senha que os convidados digitam (pergunte ao Ze)
 ORIGENS_PERMITIDAS = [r"^https://guilherme-lopesz\.github\.io$"]
 JANELA_TITULO = ""                # parte do titulo da janela do karaoke (vazio = nao forca foco)
 INTERVALO_ENTRE_PEDIDOS = 1.5
