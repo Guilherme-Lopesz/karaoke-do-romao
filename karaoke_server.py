@@ -30,12 +30,12 @@ except Exception:
 # ---------------- CONFIGURACAO ----------------
 PUBLIC_KEY = "zezin2026"          # igual ao "key" do karaoke-config.json
 ADMIN_KEY = "GUILHERME2026"       # NUNCA colocar no site
-SENHA_FESTA = "zezin2026" # senha que os convidados digitam (pergunte ao Ze)
+SENHA_FESTA = "zezin2026"          # senha que os convidados digitam
 ORIGENS_PERMITIDAS = [r"^https://guilherme-lopesz\.github\.io$"]
 JANELA_TITULO = ""                # parte do titulo da janela do karaoke (vazio = nao forca foco)
 INTERVALO_ENTRE_PEDIDOS = 1.5
-INTERVALO_ENTRE_TECLAS = 0.35    # pausa entre cada numero (se ainda errar, aumente: 0.5)
-TEMPO_TECLA_PRESSIONADA = 0.08   # quanto tempo cada tecla fica apertada
+INTERVALO_ENTRE_TECLAS = 0.6     # pausa entre cada numero
+TEMPO_TECLA_PRESSIONADA = 0.25  # quanto tempo cada tecla fica apertada
 PAUSA_ANTES_DO_ENTER = 0.6       # espera depois do ultimo numero, antes do Enter
 TEMPO_PRIORIDADE = 3.0
 
