@@ -1,18 +1,22 @@
 """
-Servidor que recebe pedidos de musica pela rede e "digita" no programa do karaoke.
+Servidor do karaoke (versao compativel com o site novo: nome, senha da festa, fila, regras).
 
 Instalar:   pip install flask flask-cors pyautogui pygetwindow
 Rodar:      python karaoke_server.py
-Expor com HTTPS (necessario p/ o site no github.io):
-            cloudflared tunnel --url http://localhost:5000
-            -> copie o endereco https://xxxx.trycloudflare.com que aparecer e cole em
-               "api" no arquivo karaoke-config.json (fica ao lado do index.html no site).
+Expor:      cloudflared tunnel --url http://localhost:5000
+            -> cole o https://xxxx.trycloudflare.com em "api" no karaoke-config.json
 
-Teste rapido: abra  https://xxxx.trycloudflare.com/status  no navegador. Deve mostrar {"ok":true,...}
+karaoke-config.json (ao lado do index.html) deve ter EXATAMENTE estes nomes:
+    {"api": "https://xxxx.trycloudflare.com", "key": "zezin2026", "cooldown": 15}
+
+Teste rapido: abra https://xxxx.trycloudflare.com/status  -> {"ok":true,...}
 """
-import queue
+import hmac
 import threading
 import time
+from collections import deque
+from datetime import datetime
+from urllib.parse import unquote
 
 import pyautogui
 from flask import Flask, jsonify, request
@@ -24,24 +28,42 @@ except Exception:
     gw = None
 
 # ---------------- CONFIGURACAO ----------------
-PUBLIC_KEY = "zezin2026"   # a mesma "key" do karaoke-config.json (so permite /musica)
-ADMIN_KEY = "GUILHERME2026"      # NUNCA colocar no site (libera /comando e prioridade)
-# Dominio EXATO do site, sem o caminho (/karaoke-do-romao nao entra aqui)
+PUBLIC_KEY = "zezin2026"          # igual ao "key" do karaoke-config.json
+ADMIN_KEY = "GUILHERME2026"       # NUNCA colocar no site
+SENHA_FESTA = "troque-esta-senha" # senha que os convidados digitam (pergunte ao Ze)
 ORIGENS_PERMITIDAS = [r"^https://guilherme-lopesz\.github\.io$"]
-JANELA_TITULO = ""            # parte do titulo da janela do karaoke (vazio = nao forca foco)
+JANELA_TITULO = ""                # parte do titulo da janela do karaoke (vazio = nao forca foco)
 INTERVALO_ENTRE_PEDIDOS = 1.5
 INTERVALO_ENTRE_TECLAS = 0.08
 TEMPO_PRIORIDADE = 3.0
-MAX_FILA = 15                 # maximo de pedidos aguardando
-COOLDOWN_POR_CLIENTE = 15     # segundos entre pedidos do mesmo celular (o site usa o mesmo valor em "cooldown")
+
+# Regras (o site le estes valores em /fila e mostra no "Como funciona")
+MAX_FILA = 10                     # pedidos aguardando ao mesmo tempo
+MAX_PESSOA = 3                    # pedidos aguardando por pessoa/aparelho
+COOLDOWN_POR_CLIENTE = 15         # segundos entre pedidos do mesmo aparelho
+REPETIR_MINUTOS = 30              # mesma musica so pode ser pedida de novo apos isso
+MUSICAS_BLOQUEADAS = set()        # ex.: {"12345", "67890"}
+MAX_TENTATIVAS_SENHA = 5          # senhas erradas por minuto, por IP
 # ----------------------------------------------
 
 pyautogui.PAUSE = INTERVALO_ENTRE_TECLAS
 app = Flask(__name__)
-CORS(app, origins=ORIGENS_PERMITIDAS, allow_headers=["Content-Type", "X-API-Key"], methods=["GET", "POST", "OPTIONS"])
-fila = queue.Queue()
-ultimo_pedido = {}
+CORS(
+    app,
+    origins=ORIGENS_PERMITIDAS,
+    allow_headers=["Content-Type", "X-API-Key", "X-Cliente", "X-Senha"],
+    methods=["GET", "POST", "OPTIONS"],
+)
+
 lock = threading.Lock()
+fila = deque()                # itens aguardando: dict(codigo, nome, quem, hora, cliente, tipo)
+enviados = deque(maxlen=10)   # ultimos enviados
+comandos_pendentes = deque()  # comandos de teclado do admin
+ultimo_pedido = {}            # cliente -> timestamp
+recentes = {}                 # codigo -> timestamp do ultimo pedido
+tentativas = {}               # ip -> lista de timestamps de senha errada
+bloqueados = set()            # ids de aparelho bloqueados
+estado = {"aberto": True, "pausado": False}
 
 
 def focar_janela():
@@ -84,81 +106,210 @@ COMANDOS = {
 
 def worker():
     while True:
-        tipo, valor = fila.get()
+        item = None
+        cmd = None
+        with lock:
+            if comandos_pendentes:
+                cmd = comandos_pendentes.popleft()
+            elif fila and not estado["pausado"]:
+                item = fila.popleft()
+        if cmd is None and item is None:
+            time.sleep(0.3)
+            continue
         try:
             focar_janela()
-            if tipo == "musica":
-                enviar_musica(valor)
-            elif tipo == "prioridade":
-                enviar_prioridade(valor)
-            elif tipo == "comando":
-                COMANDOS[valor]()
-            print("OK:", tipo, valor)
+            if cmd is not None:
+                COMANDOS[cmd]()
+                print("OK: comando", cmd)
+            else:
+                if item["tipo"] == "prioridade":
+                    enviar_prioridade(item["codigo"])
+                else:
+                    enviar_musica(item["codigo"])
+                with lock:
+                    enviados.appendleft(item)
+                print("OK:", item["tipo"], item["codigo"], item["quem"])
         except Exception as e:
-            print("Erro ao processar", tipo, valor, e)
+            print("Erro ao processar", cmd or item, e)
         time.sleep(INTERVALO_ENTRE_PEDIDOS)
-        fila.task_done()
 
 
 def chave():
-    return request.headers.get("X-API-Key")
+    return request.headers.get("X-API-Key", "")
 
 
 def ip_cliente():
     return request.headers.get("CF-Connecting-IP", request.remote_addr)
 
 
+def id_cliente():
+    c = request.headers.get("X-Cliente", "").strip()[:40]
+    return c or ip_cliente()
+
+
+def senha_ok(senha):
+    return hmac.compare_digest(senha.encode(), SENHA_FESTA.encode())
+
+
+def publico(item):
+    return {k: item[k] for k in ("codigo", "nome", "quem", "hora")}
+
+
+def regras():
+    return {
+        "cooldown": COOLDOWN_POR_CLIENTE,
+        "max_pessoa": MAX_PESSOA,
+        "repetir": REPETIR_MINUTOS,
+        "max_fila": MAX_FILA,
+    }
+
+
 @app.get("/")
 def raiz():
-    return "Servidor do karaoke no ar. Os pedidos chegam em /musica.", 200
+    return "Servidor do karaoke no ar.", 200
 
 
 @app.get("/status")
 def status():
-    # Sem chave: serve so para voce testar se o tunel esta funcionando.
-    return jsonify(ok=True, na_fila=fila.qsize())
+    return jsonify(ok=True, na_fila=len(fila))
+
+
+@app.get("/fila")
+def ver_fila():
+    if chave() not in (PUBLIC_KEY, ADMIN_KEY):
+        return jsonify(erro="chave"), 401
+    with lock:
+        return jsonify(
+            regras=regras(),
+            aberto=estado["aberto"],
+            pausado=estado["pausado"],
+            fila=[publico(i) for i in fila],
+            enviados=[publico(i) for i in enviados],
+        )
 
 
 @app.post("/musica")
 def musica():
     k = chave()
     if k not in (PUBLIC_KEY, ADMIN_KEY):
-        return jsonify(erro="nao autorizado"), 401
+        return jsonify(erro="chave"), 401
     dados = request.get_json(silent=True) or {}
     codigo = str(dados.get("codigo", "")).strip()
     if not codigo.isdigit() or len(codigo) > 8:
-        return jsonify(erro="codigo invalido"), 400
+        return jsonify(erro="codigo_invalido"), 400
+    nome_musica = str(dados.get("nome", "")).strip()[:80]
+    quem = str(dados.get("quem", "")).strip()[:20]
 
     eh_admin = k == ADMIN_KEY
+    cliente = id_cliente()
+    agora = time.time()
+
     with lock:
         if not eh_admin:
-            if fila.qsize() >= MAX_FILA:
-                return jsonify(erro="fila cheia, tente em instantes"), 503
             ip = ip_cliente()
-            agora = time.time()
-            espera = COOLDOWN_POR_CLIENTE - (agora - ultimo_pedido.get(ip, 0))
+
+            # senha da festa (com limite de tentativas erradas)
+            erradas = [t for t in tentativas.get(ip, []) if agora - t < 60]
+            tentativas[ip] = erradas
+            if len(erradas) >= MAX_TENTATIVAS_SENHA:
+                return jsonify(erro="muitas_tentativas"), 429
+            senha = unquote(request.headers.get("X-Senha", ""))
+            if not senha_ok(senha):
+                erradas.append(agora)
+                return jsonify(erro="senha"), 401
+
+            if cliente in bloqueados:
+                return jsonify(erro="bloqueado"), 403
+            if not estado["aberto"]:
+                return jsonify(erro="fechado"), 403
+            if not quem:
+                return jsonify(erro="nome"), 400
+            if codigo in MUSICAS_BLOQUEADAS:
+                return jsonify(erro="musica_bloqueada"), 403
+
+            ultimo = recentes.get(codigo, 0)
+            if agora - ultimo < REPETIR_MINUTOS * 60:
+                return jsonify(erro="repetida"), 409
+            if sum(1 for i in fila if i["cliente"] == cliente) >= MAX_PESSOA:
+                return jsonify(erro="limite"), 429
+            espera = COOLDOWN_POR_CLIENTE - (agora - ultimo_pedido.get(cliente, 0))
             if espera > 0:
                 return jsonify(erro="aguarde", espere=int(espera) + 1), 429
-            ultimo_pedido[ip] = agora
-            # limpa registros antigos para o dicionario nao crescer sem parar
-            for antigo in [i for i, t in ultimo_pedido.items() if agora - t > 3600]:
-                del ultimo_pedido[antigo]
+            if len(fila) >= MAX_FILA:
+                return jsonify(erro="fila_cheia"), 503
+
+            ultimo_pedido[cliente] = agora
+            recentes[codigo] = agora
+            # limpeza para os dicionarios nao crescerem sem parar
+            for d in (ultimo_pedido, recentes):
+                for antigo in [x for x, t in d.items() if agora - t > 7200]:
+                    del d[antigo]
 
         tipo = "prioridade" if (eh_admin and dados.get("prioridade")) else "musica"
-        fila.put((tipo, codigo))
-        return jsonify(ok=True, na_fila=fila.qsize())
+        fila.append({
+            "codigo": codigo,
+            "nome": nome_musica,
+            "quem": quem or ("Admin" if eh_admin else ""),
+            "hora": datetime.now().strftime("%H:%M"),
+            "cliente": cliente,
+            "tipo": tipo,
+        })
+        return jsonify(ok=True, posicao=len(fila))
 
 
 @app.post("/comando")
 def comando():
+    """Teclas no programa do karaoke (so admin)."""
     if chave() != ADMIN_KEY:
         return jsonify(erro="nao autorizado"), 401
     dados = request.get_json(silent=True) or {}
     acao = dados.get("acao")
     if acao not in COMANDOS:
         return jsonify(erro="acao invalida", validas=list(COMANDOS)), 400
-    fila.put(("comando", acao))
+    with lock:
+        comandos_pendentes.append(acao)
     return jsonify(ok=True)
+
+
+@app.post("/admin")
+def admin():
+    """Controle da fila (so admin).
+    acao: abrir | fechar | pausar_fila | retomar_fila | limpar_fila
+          | remover (posicao: 1,2,...) | bloquear / desbloquear (posicao ou cliente)
+    """
+    if chave() != ADMIN_KEY:
+        return jsonify(erro="nao autorizado"), 401
+    dados = request.get_json(silent=True) or {}
+    acao = dados.get("acao")
+    with lock:
+        if acao == "abrir":
+            estado["aberto"] = True
+        elif acao == "fechar":
+            estado["aberto"] = False
+        elif acao == "pausar_fila":
+            estado["pausado"] = True
+        elif acao == "retomar_fila":
+            estado["pausado"] = False
+        elif acao == "limpar_fila":
+            fila.clear()
+        elif acao in ("remover", "bloquear", "desbloquear"):
+            cliente = dados.get("cliente")
+            pos = dados.get("posicao")
+            if pos is not None:
+                try:
+                    cliente_pos = list(fila)[int(pos) - 1]
+                except (ValueError, IndexError):
+                    return jsonify(erro="posicao invalida"), 400
+                if acao == "remover":
+                    fila.remove(cliente_pos)
+                cliente = cliente or cliente_pos["cliente"]
+            if acao == "bloquear" and cliente:
+                bloqueados.add(cliente)
+            elif acao == "desbloquear" and cliente:
+                bloqueados.discard(cliente)
+        else:
+            return jsonify(erro="acao invalida"), 400
+        return jsonify(ok=True, **estado, na_fila=len(fila), bloqueados=len(bloqueados))
 
 
 if __name__ == "__main__":
